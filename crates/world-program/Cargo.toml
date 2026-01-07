@@ -1,0 +1,18 @@
+[package]
+name = "world-program"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "L2 World Layer Program - handles player positioning, combat, healing"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program.workspace = true
+solana-program-runtime.workspace = true
+borsh.workspace = true
+thiserror.workspace = true
+
+[features]
+no-entrypoint = []

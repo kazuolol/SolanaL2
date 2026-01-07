@@ -1,0 +1,39 @@
+[package]
+name = "solana-l2-validator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "solana-l2"
+path = "src/main.rs"
+
+[dependencies]
+# Solana
+solana-sdk.workspace = true
+
+# Async
+tokio.workspace = true
+
+# Concurrency
+parking_lot.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Error handling
+anyhow.workspace = true
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Workspace
+l2-runtime.workspace = true
+l1-bridge.workspace = true
+rpc-server.workspace = true
+l2-consensus.workspace = true

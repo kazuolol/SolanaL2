@@ -1,0 +1,10 @@
+[package]
+name = "l1-integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared types for L1/L2 integration"
+
+[dependencies]
+solana-sdk.workspace = true
+borsh.workspace = true

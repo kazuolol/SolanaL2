@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>L2 Game Client - 3D</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 10px 20px;
+      width: 100%;
+      background: #16213e;
+    }
+    h1 { color: #9d4edd; font-size: 18px; }
+    #status {
+      padding: 4px 12px;
+      background: #0f0f23;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #status.connected { color: #4ade80; }
+    #status.disconnected { color: #f87171; }
+    #status.connecting { color: #fbbf24; }
+
+    #game-container {
+      flex: 1;
+      width: 100%;
+      position: relative;
+      cursor: crosshair;
+    }
+
+    /* Crosshair overlay */
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #crosshair::before,
+    #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255, 255, 255, 0.7);
+    }
+    #crosshair::before {
+      left: 50%;
+      top: 0;
+      width: 2px;
+      height: 100%;
+      transform: translateX(-50%);
+    }
+    #crosshair::after {
+      top: 50%;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      transform: translateY(-50%);
+    }
+
+    #controls-hint {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 4px;
+      font-size: 14px;
+      color: #888;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #debug {
+      position: absolute;
+      bottom: 60px;
+      right: 10px;
+      padding: 10px;
+      background: rgba(22, 33, 62, 0.9);
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      max-width: 300px;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+
+    #tx-log {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      border: 1px solid #4ade80;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 10px;
+      max-width: 400px;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+
+    #tx-log-header {
+      color: #4ade80;
+      font-weight: bold;
+      margin-bottom: 5px;
+      border-bottom: 1px solid #4ade80;
+      padding-bottom: 3px;
+    }
+
+    .tx-entry {
+      padding: 2px 0;
+      border-bottom: 1px solid #333;
+      color: #aaa;
+    }
+
+    .tx-slot {
+      color: #fbbf24;
+      margin-right: 8px;
+    }
+
+    .tx-action {
+      color: #60a5fa;
+      margin-right: 8px;
+    }
+
+    .tx-sig {
+      color: #4ade80;
+      font-size: 9px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SVM L2 Game - 3D</h1>
+    <div id="status" class="disconnected">Disconnected</div>
+  </header>
+
+  <div id="game-container">
+    <div id="crosshair"></div>
+    <div id="controls-hint">Press J to join the world</div>
+    <div id="tx-log">
+      <div id="tx-log-header">L2 Chain Writes</div>
+    </div>
+    <div id="debug"></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

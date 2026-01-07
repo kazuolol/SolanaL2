@@ -1,0 +1,84 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/l2-runtime",
+    "crates/l1-bridge",
+    "crates/rpc-server",
+    "crates/validator",
+    "crates/world-program",
+    "crates/l1-integration",
+    "crates/consensus",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/BigCorpp/SolanaL2"
+
+[workspace.dependencies]
+# SVM Runtime - pinned to 2.1.x to match API
+solana-svm = "=2.1.0"
+solana-sdk = "=2.1.0"
+solana-program = "=2.1.0"
+solana-program-runtime = "=2.1.0"
+solana-compute-budget = "=2.1.0"
+solana-system-program = "=2.1.0"
+solana-bpf-loader-program = "=2.1.0"
+solana-loader-v4-program = "=2.1.0"
+solana-transaction-status = "=2.1.0"
+
+# Async Runtime
+tokio = { version = "1.37", features = ["full", "rt-multi-thread", "time", "sync", "macros"] }
+tokio-tungstenite = "0.24"
+futures = "0.3"
+async-trait = "0.1"
+
+# Concurrency
+dashmap = "6.0"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+# RPC / HTTP
+jsonrpsee = { version = "0.24", features = ["server", "http-client", "ws-client"] }
+hyper = { version = "1.4", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.6", features = ["cors"] }
+axum = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+borsh = { version = "1.5", features = ["derive"] }
+bincode = "1.3"
+bs58 = "0.5"
+base64 = "0.22"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Crypto
+ed25519-dalek = "2.1"
+rand = "0.8"
+
+# Workspace crates
+l2-runtime = { path = "crates/l2-runtime" }
+l1-bridge = { path = "crates/l1-bridge" }
+rpc-server = { path = "crates/rpc-server" }
+l1-integration = { path = "crates/l1-integration" }
+world-program = { path = "crates/world-program" }
+l2-consensus = { path = "crates/consensus" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+# Patch to avoid OpenSSL dependency on Windows
+[patch.crates-io]
+solana-secp256r1-program = { path = "crates/secp256r1-stub" }

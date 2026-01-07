@@ -1,0 +1,50 @@
+[package]
+name = "rpc-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Solana
+solana-sdk.workspace = true
+solana-transaction-status.workspace = true
+
+# Async
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# HTTP/RPC
+jsonrpsee.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+hyper.workspace = true
+
+# Concurrency
+dashmap.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+borsh.workspace = true
+bincode.workspace = true
+bs58.workspace = true
+base64.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Random
+rand.workspace = true
+
+# Workspace
+l2-runtime.workspace = true
+l2-consensus.workspace = true
