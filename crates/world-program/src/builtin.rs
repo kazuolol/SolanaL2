@@ -8,6 +8,9 @@
 //! - Easier debugging
 //! - Full Rust standard library access
 
+// Required by the declare_process_instruction! macro
+use solana_sdk;
+
 use borsh::BorshDeserialize;
 use solana_program::instruction::InstructionError;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -15,21 +18,16 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use crate::{
     constants::*,
     instruction::WorldInstruction,
-    state::{MovementInput, WeaponStats, WorldConfig, WorldPlayer},
+    state::{MovementInput, MovementInput3D, WeaponStats, WorldConfig, WorldPlayer},
 };
 
-/// Builtin entrypoint for SVM registration
-pub struct Entrypoint;
-
-impl Entrypoint {
-    /// VM entrypoint - this is registered with the SVM as a builtin
-    pub fn vm(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
-        process_instruction(invoke_context)
-    }
-}
+// Use the declare_process_instruction! macro to create a properly typed builtin entrypoint
+solana_program_runtime::declare_process_instruction!(Entrypoint, 200, |invoke_context| {
+    process_instruction_inner(invoke_context)
+});
 
 /// Process a world program instruction
-fn process_instruction(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+fn process_instruction_inner(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let instruction_context = transaction_context
         .get_current_instruction_context()
@@ -72,6 +70,10 @@ fn process_instruction(invoke_context: &mut InvokeContext) -> Result<(), Instruc
 
         WorldInstruction::SetPvpZone { in_pvp_zone } => {
             process_set_pvp_zone(invoke_context, in_pvp_zone)
+        }
+
+        WorldInstruction::MovePlayer3D { input } => {
+            process_move_player_3d(invoke_context, input)
         }
     }
 }
@@ -586,6 +588,76 @@ fn process_set_pvp_zone(
     player.in_pvp_zone = in_pvp_zone;
 
     // Save player
+    let player_data_mut = player_account.get_data_mut()
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+    borsh::to_writer(&mut player_data_mut[..], &player)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    Ok(())
+}
+
+/// Move player with 3D physics
+fn process_move_player_3d(
+    invoke_context: &mut InvokeContext,
+    input: MovementInput3D,
+) -> Result<(), InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
+    let instruction_context = transaction_context
+        .get_current_instruction_context()
+        .map_err(|_| InstructionError::InvalidInstructionData)?;
+
+    // Account indices: 0=world, 1=player, 2=authority
+    let world_account = instruction_context
+        .try_borrow_instruction_account(transaction_context, 0)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    let mut player_account = instruction_context
+        .try_borrow_instruction_account(transaction_context, 1)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    let authority_account = instruction_context
+        .try_borrow_instruction_account(transaction_context, 2)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    // Verify authority is signer
+    if !authority_account.is_signer() {
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    // Load world config
+    let world_data = world_account.get_data();
+    let world = WorldConfig::try_from_slice(world_data)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    // Load player
+    let player_data = player_account.get_data();
+    let mut player = WorldPlayer::try_from_slice(player_data)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+
+    // Verify authority
+    if player.authority != *authority_account.get_key() {
+        return Err(InstructionError::Custom(2)); // InvalidAuthority
+    }
+
+    // Verify world
+    if player.world != *world_account.get_key() {
+        return Err(InstructionError::Custom(3)); // InvalidWorld
+    }
+
+    // Check if alive
+    if !player.is_alive() {
+        return Err(InstructionError::Custom(4)); // PlayerDead
+    }
+
+    // Apply 3D movement with physics
+    player.apply_movement_3d(&input, &world);
+
+    // Update last action slot
+    let clock = invoke_context.get_sysvar_cache().get_clock()
+        .map_err(|_| InstructionError::UnsupportedSysvar)?;
+    player.last_action_slot = clock.slot;
+
+    // Serialize player back
     let player_data_mut = player_account.get_data_mut()
         .map_err(|_| InstructionError::InvalidAccountData)?;
     borsh::to_writer(&mut player_data_mut[..], &player)

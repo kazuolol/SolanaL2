@@ -2777,6 +2777,7 @@ dependencies = [
  "tower 0.4.13",
  "tower-http",
  "tracing",
+ "world-program",
 ]
 
 [[package]]
@@ -5621,6 +5622,7 @@ dependencies = [
  "borsh 1.6.0",
  "solana-program",
  "solana-program-runtime",
+ "solana-sdk",
  "thiserror",
 ]
 

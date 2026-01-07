@@ -31,8 +31,9 @@ pub use state::{WorldConfig, WorldPlayer, MovementInput, MovementInput3D, Weapon
 pub use instruction::WorldInstruction;
 pub use error::WorldError;
 
-// Declare program ID (placeholder - will be replaced with actual deployed program ID)
-solana_program::declare_id!("11111111111111111111111111111111");
+// World Program ID - unique identifier for the L2 game world program
+// Note: base58 excludes: 0, I, O, l (lowercase L)
+solana_program::declare_id!("Wor1dProgram1111111111111111111111111111111");
 
 // Entry point
 #[cfg(not(feature = "no-entrypoint"))]

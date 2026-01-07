@@ -48,3 +48,4 @@ rand.workspace = true
 # Workspace
 l2-runtime.workspace = true
 l2-consensus.workspace = true
+world-program.workspace = true

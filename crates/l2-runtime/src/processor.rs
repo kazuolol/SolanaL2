@@ -115,6 +115,7 @@ impl L2Processor {
             bpf_loader::id(),
             bpf_loader_deprecated::id(),
             bpf_loader_upgradeable::id(),
+            world_program::id(),
         ]
         .into_iter()
         .collect();
@@ -225,8 +226,12 @@ impl L2Processor {
             solana_bpf_loader_program::Entrypoint::vm,
         );
 
-        // Note: World Program uses GameHandler for direct execution
-        // rather than SVM builtin registration (simpler for MVP)
+        // World Program - L2 game logic with signature verification
+        self.add_builtin(
+            "world_program",
+            world_program::id(),
+            world_program::builtin::Entrypoint::vm,
+        );
     }
 
     /// Add a builtin program
@@ -318,6 +323,8 @@ impl L2Processor {
         transactions: &[SanitizedTransaction],
         output: LoadAndExecuteSanitizedTransactionsOutput,
     ) -> Vec<TransactionResult> {
+        use solana_svm::transaction_processing_result::ProcessedTransaction;
+
         let mut results = Vec::with_capacity(transactions.len());
 
         for (tx, result) in transactions
@@ -345,9 +352,31 @@ impl L2Processor {
                         (true, None, vec![])
                     };
 
-                    // Collect modified accounts - simplified for now
-                    // Full implementation would iterate over loaded_transaction accounts
-                    let modified_accounts = Vec::new();
+                    // Extract and store modified accounts
+                    let mut modified_accounts = Vec::new();
+
+                    if success {
+                        // Get accounts from the executed transaction
+                        if let ProcessedTransaction::Executed(executed) = &processed {
+                            // The loaded_transaction.accounts contains (Pubkey, AccountSharedData) tuples
+                            // Write each modified account back to the store
+                            for (pubkey, account) in &executed.loaded_transaction.accounts {
+                                // Store the account in our account store
+                                self.account_store.store_account(
+                                    *pubkey,
+                                    account.clone(),
+                                    self.current_slot,
+                                );
+                                modified_accounts.push((*pubkey, account.clone()));
+                            }
+
+                            tracing::debug!(
+                                "Transaction {} succeeded: {} accounts modified",
+                                signature,
+                                modified_accounts.len()
+                            );
+                        }
+                    }
 
                     results.push(TransactionResult {
                         signature,
@@ -359,6 +388,7 @@ impl L2Processor {
                     });
                 }
                 Err(e) => {
+                    tracing::debug!("Transaction {} failed: {:?}", signature, e);
                     results.push(TransactionResult {
                         signature,
                         slot: self.current_slot,

@@ -20,7 +20,7 @@ use crate::{
     constants::*,
     error::WorldError,
     instruction::WorldInstruction,
-    state::{WorldConfig, WorldPlayer},
+    state::{MovementInput3D, WorldConfig, WorldPlayer},
 };
 
 /// Process instruction
@@ -58,6 +58,10 @@ pub fn process(
 
         WorldInstruction::SetPvpZone { in_pvp_zone } => {
             process_set_pvp_zone(program_id, accounts, in_pvp_zone)
+        }
+
+        WorldInstruction::MovePlayer3D { input } => {
+            process_move_player_3d(program_id, accounts, input)
         }
     }
 }
@@ -492,6 +496,61 @@ fn process_set_pvp_zone(
 
     // Update PVP zone status
     player.in_pvp_zone = in_pvp_zone;
+
+    // Save player
+    player.serialize(&mut *player_account.data.borrow_mut())?;
+
+    Ok(())
+}
+
+/// Move player with 3D physics
+fn process_move_player_3d(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    input: MovementInput3D,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let world_account = next_account_info(accounts_iter)?;
+    let player_account = next_account_info(accounts_iter)?;
+    let authority = next_account_info(accounts_iter)?;
+
+    // Verify authority is signer
+    if !authority.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Verify account owner
+    if player_account.owner != program_id {
+        return Err(WorldError::InvalidAccountOwner.into());
+    }
+
+    // Load world config
+    let world = WorldConfig::try_from_slice(&world_account.data.borrow())?;
+
+    // Load player
+    let mut player = WorldPlayer::try_from_slice(&player_account.data.borrow())?;
+
+    // Verify authority
+    if player.authority != *authority.key {
+        return Err(WorldError::InvalidAuthority.into());
+    }
+
+    // Verify world
+    if player.world != *world_account.key {
+        return Err(WorldError::InvalidWorld.into());
+    }
+
+    // Check if alive
+    if !player.is_alive() {
+        return Err(WorldError::PlayerDead.into());
+    }
+
+    // Apply 3D movement with physics
+    player.apply_movement_3d(&input, &world);
+
+    // Update last action slot
+    let clock = Clock::get()?;
+    player.last_action_slot = clock.slot;
 
     // Save player
     player.serialize(&mut *player_account.data.borrow_mut())?;

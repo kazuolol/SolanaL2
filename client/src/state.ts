@@ -9,8 +9,8 @@ import { PublicKey } from '@solana/web3.js';
 // Fixed-point scale: 1000 = 1.0 world unit
 export const FIXED_POINT_SCALE = 1000;
 
-// World program ID (placeholder - matches the one in world-program)
-export const WORLD_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
+// World program ID - must match the ID in world-program crate
+export const WORLD_PROGRAM_ID = new PublicKey('Wor1dProgram1111111111111111111111111111111');
 
 // Seeds
 export const WORLD_SEED = Buffer.from('world');

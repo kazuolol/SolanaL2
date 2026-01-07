@@ -93,12 +93,10 @@ const DEFAULT_HEALTH: u16 = 100;
 const DEFAULT_WORLD_WIDTH: u32 = 100;
 const DEFAULT_WORLD_DEPTH: u32 = 100;
 
-/// World program ID (placeholder)
+/// World program ID - must match world-program crate
 pub fn world_program_id() -> Pubkey {
-    Pubkey::new_from_array([
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    ])
+    // "Wor1dProgram11111111111111111111111111111111" in base58
+    world_program::id()
 }
 
 /// Seeds for PDAs

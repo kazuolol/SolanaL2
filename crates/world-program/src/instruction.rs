@@ -1,7 +1,7 @@
 //! World Program Instructions
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use crate::state::{MovementInput, WeaponStats};
+use crate::state::{MovementInput, MovementInput3D, WeaponStats};
 
 /// World program instructions
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
@@ -97,5 +97,16 @@ pub enum WorldInstruction {
     /// 1. `[signer]` Player authority
     SetPvpZone {
         in_pvp_zone: bool,
+    },
+
+    /// Move player with 3D input (camera-relative movement + physics)
+    ///
+    /// Accounts:
+    /// 0. `[]` World config account
+    /// 1. `[writable]` World player account
+    /// 2. `[signer]` Player authority
+    MovePlayer3D {
+        /// 3D movement input (camera-relative with jump)
+        input: MovementInput3D,
     },
 }
