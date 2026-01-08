@@ -29,6 +29,9 @@ tracing-subscriber.workspace = true
 # Error handling
 anyhow.workspace = true
 
+# Time
+chrono.workspace = true
+
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
@@ -37,3 +40,4 @@ l2-runtime.workspace = true
 l1-bridge.workspace = true
 rpc-server.workspace = true
 l2-consensus.workspace = true
+world-program.workspace = true

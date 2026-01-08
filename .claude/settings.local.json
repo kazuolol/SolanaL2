@@ -19,7 +19,10 @@
       "Bash(~/.cargo/bin/cargo build:*)",
       "Bash(~/.cargo/bin/cargo check:*)",
       "Bash(./target/release/solana-l2.exe:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(tasklist:*)",
+      "Bash(cmd.exe /c:*)",
+      "Bash(/c/Users/gazin/.cargo/bin/cargo build --release -p solana-l2-validator)"
     ]
   }
 }

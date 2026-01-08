@@ -37,8 +37,28 @@ impl TransactionProcessingCallback for L2AccountLoader {
     ///
     /// This is called by the SVM during transaction loading to retrieve
     /// account data for all accounts referenced in a transaction.
+    ///
+    /// For L2, we return a default zeroed account for missing accounts.
+    /// This allows new accounts (like player PDAs) to be created on-the-fly
+    /// during transaction execution without requiring explicit create_account
+    /// instructions via the system program.
     fn get_account_shared_data(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        self.account_store.get_account(pubkey)
+        match self.account_store.get_account(pubkey) {
+            Some(account) => Some(account),
+            None => {
+                // Return a default account for missing accounts
+                // This enables account creation during transaction execution
+                // The account will be properly initialized by the program
+                // and saved to the store after successful execution
+                Some(AccountSharedData::new(
+                    0, // lamports
+                    // Allocate enough space for the largest account type (WorldPlayer)
+                    // WorldPlayer size: 32+32+4+4+4+2+2+2+2+2+2+8+8+1+1+1+16 = 123 bytes
+                    256, // generous buffer for account data
+                    &solana_sdk::system_program::id(), // initial owner is system
+                ))
+            }
+        }
     }
 
     /// Check if an account is owned by one of the given programs
@@ -117,11 +137,16 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_account() {
+    fn test_missing_account_returns_default() {
         let store = Arc::new(AccountStore::new());
         let loader = L2AccountLoader::new(store);
 
         let pubkey = Pubkey::new_unique();
-        assert!(loader.get_account_shared_data(&pubkey).is_none());
+        // Now returns a default account instead of None
+        let account = loader.get_account_shared_data(&pubkey);
+        assert!(account.is_some());
+        let account = account.unwrap();
+        assert_eq!(account.lamports(), 0);
+        assert_eq!(account.data().len(), 256);
     }
 }

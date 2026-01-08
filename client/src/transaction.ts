@@ -12,7 +12,7 @@ import {
 } from '@solana/web3.js';
 import { Direction, WORLD_PROGRAM_ID, deriveWorldPda, deriveWorldPlayerPda } from './state';
 
-/** Instruction discriminants (matches WorldInstruction enum) */
+/** Instruction discriminants (matches WorldInstruction enum in Borsh order) */
 enum WorldInstructionType {
   InitializeWorld = 0,
   JoinWorld = 1,
@@ -22,6 +22,7 @@ enum WorldInstructionType {
   LeaveWorld = 5,
   UpdateWorld = 6,
   SetPvpZone = 7,
+  MovePlayer3D = 8,
 }
 
 /** Build JoinWorld instruction */
@@ -68,6 +69,44 @@ export function buildMovePlayerInstruction(
   data.writeUInt8(WorldInstructionType.MovePlayer, 0);
   data.writeUInt8(direction, 1);
   data.writeUInt8(sprint ? 1 : 0, 2);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: world, isSigner: false, isWritable: false },
+      { pubkey: player, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    programId,
+    data,
+  });
+}
+
+/** 3D Movement input */
+export interface MovementInput3D {
+  moveX: number;    // -127 to 127 (camera-relative left/right)
+  moveZ: number;    // -127 to 127 (camera-relative forward/back)
+  cameraYaw: number; // 0-65535 (0-360 degrees)
+  sprint: boolean;
+  jump: boolean;
+}
+
+/** Build MovePlayer3D instruction */
+export function buildMovePlayer3DInstruction(
+  world: PublicKey,
+  player: PublicKey,
+  authority: PublicKey,
+  input: MovementInput3D,
+  programId: PublicKey = WORLD_PROGRAM_ID
+): TransactionInstruction {
+  // Instruction data layout (Borsh):
+  // [type (1 byte), move_x (i8), move_z (i8), camera_yaw (i16 LE), sprint (bool), jump (bool)]
+  const data = Buffer.alloc(7);
+  data.writeUInt8(WorldInstructionType.MovePlayer3D, 0);
+  data.writeInt8(input.moveX, 1);
+  data.writeInt8(input.moveZ, 2);
+  data.writeInt16LE(input.cameraYaw, 3);
+  data.writeUInt8(input.sprint ? 1 : 0, 5);
+  data.writeUInt8(input.jump ? 1 : 0, 6);
 
   return new TransactionInstruction({
     keys: [
@@ -208,7 +247,7 @@ export class GameClient {
     return tx;
   }
 
-  /** Build move player transaction */
+  /** Build move player transaction (legacy 2D) */
   buildMove(recentBlockhash: string, direction: Direction, sprint: boolean = false): Transaction {
     const ix = buildMovePlayerInstruction(
       this.worldPda,
@@ -216,6 +255,25 @@ export class GameClient {
       this.keypair.publicKey,
       direction,
       sprint,
+      this.programId
+    );
+
+    const tx = new Transaction();
+    tx.recentBlockhash = recentBlockhash;
+    tx.feePayer = this.keypair.publicKey;
+    tx.add(ix);
+    tx.sign(this.keypair);
+
+    return tx;
+  }
+
+  /** Build 3D move player transaction */
+  buildMove3D(recentBlockhash: string, input: MovementInput3D): Transaction {
+    const ix = buildMovePlayer3DInstruction(
+      this.worldPda,
+      this.playerPda,
+      this.keypair.publicKey,
+      input,
       this.programId
     );
 

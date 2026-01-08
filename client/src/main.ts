@@ -1,18 +1,27 @@
 /**
  * L2 Game Client - Main Entry Point (3D Version)
  *
+ * Uses REAL Solana transactions routed through SVM.
  * Third-person 3D movement with mouse look and WASD controls.
- * Uses game_move3d RPC for camera-relative movement.
  */
 
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import { L2Connection } from './connection';
 import { Renderer3D } from './renderer3d';
-import { FIXED_POINT_SCALE, MovementInput3D } from './state';
+import { GameClient, MovementInput3D } from './transaction';
+import {
+  FIXED_POINT_SCALE,
+  WORLD_PROGRAM_ID,
+  deriveWorldPda,
+  deriveWorldPlayerPda,
+  decodeWorldPlayer,
+  WorldPlayer,
+} from './state';
 
 // Configuration
 const RPC_URL = 'http://127.0.0.1:8899';
 const WS_URL = 'ws://127.0.0.1:8900';
+const DEFAULT_WORLD_NAME = 'default';
 
 // UI Elements
 const statusEl = document.getElementById('status')!;
@@ -24,8 +33,9 @@ const controlsHint = document.getElementById('controls-hint')!;
 let connection: L2Connection;
 let renderer: Renderer3D;
 let keypair: Keypair;
-let playerPda: string | null = null;
+let gameClient: GameClient;
 let isJoined = false;
+let currentBlockhash: string = '';
 
 // Key state tracking
 const keysPressed = new Set<string>();
@@ -46,7 +56,7 @@ function log(msg: string): void {
 const txLogEl = document.getElementById('tx-log')!;
 let txCount = 0;
 
-// Log a transaction/write to the chain
+// Log a transaction
 function logTx(action: string, slot: number, signature: string, account?: string): void {
   txCount++;
   const time = new Date().toLocaleTimeString();
@@ -71,9 +81,67 @@ function setStatus(status: 'connected' | 'disconnected' | 'connecting'): void {
   statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+// Fetch latest blockhash
+async function refreshBlockhash(): Promise<void> {
+  try {
+    const result = await connection.rpc<{ value: { blockhash: string } }>('getLatestBlockhash', []);
+    if (result?.value?.blockhash) {
+      currentBlockhash = result.value.blockhash;
+    }
+  } catch (e) {
+    log(`Failed to get blockhash: ${e}`);
+  }
+}
+
+// Get player state from account data
+async function getPlayerState(): Promise<WorldPlayer | null> {
+  try {
+    const playerPda = gameClient.player;
+    const result = await connection.rpc<{ value: { data: [string, string] } | null }>('getAccountInfo', [
+      playerPda.toBase58(),
+      { encoding: 'base64' }
+    ]);
+
+    if (!result?.value?.data) {
+      return null;
+    }
+
+    const data = Buffer.from(result.value.data[0], 'base64');
+    return decodeWorldPlayer(data);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Get all players by scanning program accounts
+async function getAllPlayers(): Promise<{ pda: string; player: WorldPlayer }[]> {
+  // For now, just get our own player since getProgramAccounts isn't implemented
+  // In a full implementation, we'd use getProgramAccounts
+  const player = await getPlayerState();
+  if (player) {
+    return [{ pda: gameClient.player.toBase58(), player }];
+  }
+  return [];
+}
+
+// Update renderer from player state
+function updatePlayerFromState(player: WorldPlayer): void {
+  if (!player) return;
+
+  renderer.updatePlayer(keypair.publicKey.toBase58(), {
+    positionX: player.positionX,
+    positionZ: player.positionZ,
+    positionY: player.positionY,
+    yaw: player.yaw,
+    health: player.health,
+    maxHealth: player.maxHealth,
+    name: player.name,
+  });
+}
+
 // Initialize
 async function init(): Promise<void> {
-  log('Initializing 3D game client...');
+  log('Initializing 3D game client (REAL TRANSACTIONS)...');
 
   // Generate or load keypair
   const storedKey = localStorage.getItem('l2_keypair');
@@ -85,6 +153,11 @@ async function init(): Promise<void> {
     localStorage.setItem('l2_keypair', JSON.stringify(Array.from(keypair.secretKey)));
     log(`Generated new keypair: ${keypair.publicKey.toBase58().slice(0, 8)}...`);
   }
+
+  // Create game client for building transactions
+  gameClient = new GameClient(DEFAULT_WORLD_NAME, keypair, WORLD_PROGRAM_ID);
+  log(`World PDA: ${gameClient.world.toBase58().slice(0, 8)}...`);
+  log(`Player PDA: ${gameClient.player.toBase58().slice(0, 8)}...`);
 
   // Create connection
   connection = new L2Connection(RPC_URL, WS_URL, setStatus);
@@ -103,19 +176,25 @@ async function init(): Promise<void> {
     log(`WebSocket error: ${e}`);
   }
 
-  // Check if already joined by querying game state
+  // Get initial blockhash
+  await refreshBlockhash();
+  log(`Initial blockhash: ${currentBlockhash.slice(0, 8)}...`);
+
+  // Refresh blockhash periodically
+  setInterval(refreshBlockhash, 2000);
+
+  // Check if already joined by querying account
   try {
     const player = await getPlayerState();
     if (player) {
       isJoined = true;
-      playerPda = 'derived';
       renderer.setLocalPlayer(keypair.publicKey.toBase58());
       updatePlayerFromState(player);
       log('Found existing player - already joined!');
       startInputLoop();
     }
   } catch (e) {
-    log(`Not yet joined: ${e}`);
+    log(`Not yet joined`);
   }
 
   // Start render loop
@@ -142,70 +221,15 @@ function updateControlsHint(): void {
   }
 }
 
-// Get player state from server
-async function getPlayerState(): Promise<any | null> {
-  const result = await connection.rpc<any>('game_getPlayer', [
-    keypair.publicKey.toBase58()
-  ]);
-  return result;
-}
-
-// Get all players from server
-async function getAllPlayers(): Promise<any[]> {
-  const result = await connection.rpc<any[]>('game_getAllPlayers', []);
-  return result || [];
-}
-
-// Update renderer from player state
-function updatePlayerFromState(player: any): void {
-  if (!player) return;
-
-  renderer.updatePlayer(keypair.publicKey.toBase58(), {
-    positionX: player.positionX,
-    positionZ: player.positionZ,
-    positionY: player.positionY,
-    yaw: player.yaw,
-    health: player.health,
-    maxHealth: player.maxHealth,
-    name: player.name || 'Player',
-  });
-}
-
-// Update all players in renderer
-function updateAllPlayers(players: any[]): void {
-  const localKey = keypair.publicKey.toBase58();
-
-  for (const player of players) {
-    // Use authority as the player key for identification
-    const playerKey = player.authority;
-
-    // Set local player if this is us
-    if (playerKey === localKey && !renderer.isLocked()) {
-      renderer.setLocalPlayer(localKey);
-    }
-
-    renderer.updatePlayer(playerKey, {
-      positionX: player.positionX,
-      positionZ: player.positionZ,
-      positionY: player.positionY,
-      yaw: player.yaw,
-      health: player.health,
-      maxHealth: player.maxHealth,
-      name: player.name || 'Player',
-    });
-  }
-}
-
 // Game loop - poll for state updates
 function startGameLoop(): void {
   setInterval(async () => {
     if (!isJoined) return;
 
     try {
-      // Fetch all players to see other players
-      const players = await getAllPlayers();
-      if (players.length > 0) {
-        updateAllPlayers(players);
+      const player = await getPlayerState();
+      if (player) {
+        updatePlayerFromState(player);
       }
     } catch (e) {
       // Ignore polling errors
@@ -243,7 +267,6 @@ function getMovementInput(): MovementInput3D {
   const jump = keysPressed.has(' ');
 
   // Calculate camera-relative movement (-127 to 127)
-  // In Three.js, -Z is forward (into screen), +Z is backward
   let moveX = 0;
   let moveZ = 0;
 
@@ -268,7 +291,7 @@ function getMovementInput(): MovementInput3D {
   };
 }
 
-// Input loop - continuously send movement
+// Input loop - continuously send movement transactions
 function startInputLoop(): void {
   if (inputLoopId !== null) return;
 
@@ -276,7 +299,7 @@ function startInputLoop(): void {
   const TICK_MS = 1000 / TICK_RATE;
 
   inputLoopId = window.setInterval(async () => {
-    if (!isJoined) return;
+    if (!isJoined || !currentBlockhash) return;
 
     const input = getMovementInput();
 
@@ -287,38 +310,49 @@ function startInputLoop(): void {
   }, TICK_MS);
 }
 
-// Join world using simplified RPC
+// Join world using REAL transaction
 async function joinWorld(): Promise<void> {
   if (isJoined) return;
 
-  log('Joining world...');
+  log('Joining world with REAL transaction...');
 
   try {
-    const playerName = `Player${Math.floor(Math.random() * 1000)}`;
-    const result = await connection.rpc<any>('game_joinWorld', [
-      keypair.publicKey.toBase58(),
-      playerName
-    ]);
+    // Refresh blockhash first
+    await refreshBlockhash();
+    if (!currentBlockhash) {
+      log('No blockhash available');
+      return;
+    }
 
-    if (result && result.playerPda) {
-      playerPda = result.playerPda;
+    const playerName = `Player${Math.floor(Math.random() * 1000)}`;
+
+    // Build and sign the transaction
+    const tx = gameClient.buildJoinWorld(currentBlockhash, playerName);
+    const txBase64 = GameClient.serializeTransaction(tx);
+
+    log(`Sending JoinWorld tx: ${tx.signature?.toString().slice(0, 12)}...`);
+
+    // Send via RPC
+    const signature = await connection.rpc<string>('sendTransaction', [txBase64]);
+
+    if (signature) {
+      const slot = await connection.rpc<number>('getSlot', []) || 0;
+      logTx('JoinWorld', slot, signature, gameClient.player.toBase58());
+      log(`Joined! Signature: ${signature.slice(0, 12)}...`);
+
       isJoined = true;
       renderer.setLocalPlayer(keypair.publicKey.toBase58());
-      log(`Joined! Player PDA: ${result.playerPda.slice(0, 8)}...`);
 
-      // Log the join transaction
-      if (result.signature) {
-        logTx(result.action, result.slot, result.signature, result.playerPda);
-      }
-
-      // Get initial state
-      const player = await getPlayerState();
-      if (player) {
-        updatePlayerFromState(player);
-        const x = (player.positionX / FIXED_POINT_SCALE).toFixed(1);
-        const z = (player.positionZ / FIXED_POINT_SCALE).toFixed(1);
-        log(`Spawned at (${x}, ${z})`);
-      }
+      // Wait a moment for transaction to process, then get state
+      setTimeout(async () => {
+        const player = await getPlayerState();
+        if (player) {
+          updatePlayerFromState(player);
+          const x = (player.positionX / FIXED_POINT_SCALE).toFixed(1);
+          const z = (player.positionZ / FIXED_POINT_SCALE).toFixed(1);
+          log(`Spawned at (${x}, ${z})`);
+        }
+      }, 200);
 
       // Start input loop
       startInputLoop();
@@ -328,22 +362,24 @@ async function joinWorld(): Promise<void> {
   }
 }
 
-// Send 3D move using game_move3d RPC
+// Send 3D move using REAL transaction
 async function sendMove3D(input: MovementInput3D): Promise<void> {
   try {
-    const result = await connection.rpc<any>('game_move3d', [
-      keypair.publicKey.toBase58(),
-      input.moveX,
-      input.moveZ,
-      input.cameraYaw,
-      input.sprint,
-      input.jump,
-    ]);
+    if (!currentBlockhash) return;
 
-    // Log the transaction
-    if (result && result.signature) {
-      logTx(result.action, result.slot, result.signature, result.account);
+    // Build and sign the transaction
+    const tx = gameClient.buildMove3D(currentBlockhash, input);
+    const txBase64 = GameClient.serializeTransaction(tx);
+
+    // Send via RPC (fire and forget for movement)
+    const signature = await connection.rpc<string>('sendTransaction', [txBase64]);
+
+    // Log the transaction (only occasionally to avoid spam)
+    if (signature && txCount % 10 === 0) {
+      const slot = await connection.rpc<number>('getSlot', []) || 0;
+      logTx('Move3D', slot, signature, gameClient.player.toBase58());
     }
+    txCount++;
   } catch (e) {
     // Silently ignore move errors to avoid log spam
   }

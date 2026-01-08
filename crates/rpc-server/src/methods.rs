@@ -3,14 +3,12 @@
 //! Implements Solana-compatible RPC methods for the L2.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use crate::game_handler::GameHandler;
 use l2_runtime::{AccountStore, TransactionSender};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     clock::Slot,
     hash::Hash,
     pubkey::Pubkey,
-    signature::Signature,
     transaction::VersionedTransaction,
 };
 use std::{str::FromStr, sync::Arc};
@@ -22,7 +20,6 @@ pub struct RpcContext {
     pub tx_sender: TransactionSender,
     pub current_slot: Arc<RwLock<Slot>>,
     pub current_blockhash: Arc<RwLock<Hash>>,
-    pub game_handler: GameHandler,
 }
 
 // ============ Request/Response Types ============

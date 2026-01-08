@@ -132,6 +132,12 @@ impl L2Processor {
         // Create the transaction processor (uninitialized, we'll set up program cache separately)
         let processor = TransactionBatchProcessor::<L2ForkGraph>::new_uninitialized(slot, epoch);
 
+        // Set the fork graph in the program cache (required for program lookups)
+        {
+            let mut program_cache = processor.program_cache.write().unwrap();
+            program_cache.set_fork_graph(Arc::downgrade(&fork_graph));
+        }
+
         let mut this = Self {
             processor,
             account_store,

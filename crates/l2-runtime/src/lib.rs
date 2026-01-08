@@ -2,17 +2,19 @@
 //!
 //! This crate provides the core runtime for the L2 gaming chain:
 //! - Transaction processing via solana-svm
-//! - In-memory account storage
+//! - In-memory account storage with optional disk persistence
 //! - 30Hz block production loop
 
 pub mod account_store;
 pub mod block_producer;
 pub mod callback;
+pub mod persistence;
 pub mod processor;
 
 pub use account_store::AccountStore;
 pub use block_producer::{BlockProducer, BlockProducerConfig, BlockUpdate, TransactionSender};
 pub use callback::L2AccountLoader;
+pub use persistence::{AccountStorePersistence, ChainMetadata, PersistentStore};
 pub use processor::{L2Processor, TransactionResult};
 
 /// Block time in milliseconds (30Hz = ~33.3ms)

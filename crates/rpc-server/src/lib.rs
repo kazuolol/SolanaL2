@@ -4,13 +4,11 @@
 //! - HTTP JSON-RPC: sendTransaction, getAccountInfo, getLatestBlockhash, etc.
 //! - WebSocket: accountSubscribe, accountUnsubscribe
 
-pub mod game_handler;
 pub mod http_server;
 pub mod methods;
 pub mod subscriptions;
 pub mod ws_server;
 
-pub use game_handler::GameHandler;
 pub use http_server::HttpRpcServer;
 pub use subscriptions::SubscriptionManager;
 pub use ws_server::WebSocketServer;

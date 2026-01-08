@@ -28,6 +28,10 @@ crossbeam-channel.workspace = true
 # Serialization
 borsh.workspace = true
 bincode.workspace = true
+serde.workspace = true
+
+# Persistence
+sled = "0.34"
 
 # Logging
 tracing.workspace = true
