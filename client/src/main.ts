@@ -97,18 +97,46 @@ async function refreshBlockhash(): Promise<void> {
 async function getPlayerState(): Promise<WorldPlayer | null> {
   try {
     const playerPda = gameClient.player;
-    const result = await connection.rpc<{ value: { data: [string, string] } | null }>('getAccountInfo', [
+    log(`[DEBUG] Fetching player account: ${playerPda.toBase58().slice(0, 12)}...`);
+
+    const result = await connection.rpc<{
+      value: {
+        data: [string, string];
+        owner: string;
+        lamports: number;
+      } | null
+    }>('getAccountInfo', [
       playerPda.toBase58(),
       { encoding: 'base64' }
     ]);
 
     if (!result?.value?.data) {
+      log('[DEBUG] Player account not found or no data');
+      return null;
+    }
+
+    // Check if account is owned by world program (not system program)
+    if (result.value.owner !== WORLD_PROGRAM_ID.toBase58()) {
+      log(`[DEBUG] Account owned by ${result.value.owner.slice(0, 12)}..., not world program - not initialized yet`);
       return null;
     }
 
     const data = Buffer.from(result.value.data[0], 'base64');
-    return decodeWorldPlayer(data);
+    log(`[DEBUG] Account data length: ${data.length} bytes (expected: 123)`);
+
+    // Check if data is all zeros (uninitialized account)
+    const isAllZeros = data.slice(0, 64).every(byte => byte === 0);
+    if (isAllZeros) {
+      log('[DEBUG] Account data appears uninitialized (authority/world are zeros)');
+      return null;
+    }
+
+    const player = decodeWorldPlayer(data);
+    log(`[DEBUG] Decoded player: pos=(${player.positionX}, ${player.positionY}, ${player.positionZ}), health=${player.health}`);
+    return player;
   } catch (e) {
+    log(`[ERROR] getPlayerState failed: ${e instanceof Error ? e.message : String(e)}`);
+    console.error('getPlayerState error:', e);
     return null;
   }
 }
@@ -315,14 +343,18 @@ async function joinWorld(): Promise<void> {
   if (isJoined) return;
 
   log('Joining world with REAL transaction...');
+  log(`[DEBUG] World PDA: ${gameClient.world.toBase58().slice(0, 12)}...`);
+  log(`[DEBUG] Player PDA: ${gameClient.player.toBase58().slice(0, 12)}...`);
+  log(`[DEBUG] Authority: ${keypair.publicKey.toBase58().slice(0, 12)}...`);
 
   try {
     // Refresh blockhash first
     await refreshBlockhash();
     if (!currentBlockhash) {
-      log('No blockhash available');
+      log('[ERROR] No blockhash available');
       return;
     }
+    log(`[DEBUG] Using blockhash: ${currentBlockhash.slice(0, 12)}...`);
 
     const playerName = `Player${Math.floor(Math.random() * 1000)}`;
 
@@ -338,27 +370,48 @@ async function joinWorld(): Promise<void> {
     if (signature) {
       const slot = await connection.rpc<number>('getSlot', []) || 0;
       logTx('JoinWorld', slot, signature, gameClient.player.toBase58());
-      log(`Joined! Signature: ${signature.slice(0, 12)}...`);
+      log(`Transaction sent! Signature: ${signature.slice(0, 12)}...`);
 
-      isJoined = true;
+      // Mark as joining (not fully joined until we confirm player exists)
       renderer.setLocalPlayer(keypair.publicKey.toBase58());
+      controlsHint.textContent = 'Joining world...';
 
-      // Wait a moment for transaction to process, then get state
-      setTimeout(async () => {
+      // Poll for player account creation with retry logic
+      let attempts = 0;
+      const maxAttempts = 20;  // 2 seconds max
+      const pollInterval = 100;
+
+      const pollForPlayer = async () => {
+        attempts++;
+        log(`[DEBUG] Polling for player state (attempt ${attempts}/${maxAttempts})`);
+
         const player = await getPlayerState();
-        if (player) {
+        if (player && player.health > 0) {
+          isJoined = true;
           updatePlayerFromState(player);
           const x = (player.positionX / FIXED_POINT_SCALE).toFixed(1);
+          const y = (player.positionY / FIXED_POINT_SCALE).toFixed(1);
           const z = (player.positionZ / FIXED_POINT_SCALE).toFixed(1);
-          log(`Spawned at (${x}, ${z})`);
+          log(`[SUCCESS] Spawned at (${x}, ${y}, ${z})`);
+          startInputLoop();
+          updateControlsHint();
+        } else if (attempts < maxAttempts) {
+          setTimeout(pollForPlayer, pollInterval);
+        } else {
+          log(`[ERROR] Failed to get player state after ${maxAttempts} attempts - join may have failed`);
+          controlsHint.textContent = 'Join failed - press J to retry';
+          // Don't set isJoined = true if we couldn't confirm player creation
         }
-      }, 200);
+      };
 
-      // Start input loop
-      startInputLoop();
+      // Start polling after a short initial delay
+      setTimeout(pollForPlayer, 50);
+    } else {
+      log('[ERROR] No signature returned from sendTransaction');
     }
   } catch (e) {
-    log(`Join error: ${e}`);
+    log(`[ERROR] Join error: ${e instanceof Error ? e.message : String(e)}`);
+    console.error('joinWorld error:', e);
   }
 }
 

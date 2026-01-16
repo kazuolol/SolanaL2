@@ -185,6 +185,7 @@ impl BlockProducer {
             let mut modified_accounts = Vec::new();
 
             if !pending_txs.is_empty() {
+                tracing::info!("Block producer: Processing {} transaction(s)", pending_txs.len());
                 let results = self.processor.process_transactions(&pending_txs);
 
                 for result in results {
@@ -291,6 +292,7 @@ impl BlockProducer {
             let mut modified_accounts = Vec::new();
 
             if !pending_txs.is_empty() {
+                tracing::info!("Block producer: Processing {} transaction(s)", pending_txs.len());
                 let results = self.processor.process_transactions(&pending_txs);
 
                 for result in results {

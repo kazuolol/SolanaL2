@@ -11,6 +11,9 @@ pub mod callback;
 pub mod persistence;
 pub mod processor;
 
+#[cfg(test)]
+mod tests;
+
 pub use account_store::AccountStore;
 pub use block_producer::{BlockProducer, BlockProducerConfig, BlockUpdate, TransactionSender};
 pub use callback::L2AccountLoader;

@@ -101,9 +101,11 @@ pub fn handle_send_transaction(
     .map_err(|e| RpcError::InvalidParams(format!("Cannot sanitize transaction: {:?}", e)))?;
 
     // Submit to block producer
+    tracing::info!("RPC: Received transaction {}", signature);
     ctx.tx_sender
         .send(sanitized)
         .map_err(|e| RpcError::InternalError(e))?;
+    tracing::info!("RPC: Transaction {} queued for processing", signature);
 
     Ok(signature.to_string())
 }

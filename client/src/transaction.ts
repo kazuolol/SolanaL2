@@ -34,7 +34,8 @@ export function buildJoinWorldInstruction(
   playerName: string,
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
-  // Instruction data: [type (1 byte), name (16 bytes)]
+  // Instruction data: [discriminant (1 byte), name (16 bytes)]
+  // Borsh enum uses 1-byte (u8) discriminant
   const data = Buffer.alloc(1 + 16);
   data.writeUInt8(WorldInstructionType.JoinWorld, 0);
 
@@ -44,7 +45,7 @@ export function buildJoinWorldInstruction(
 
   return new TransactionInstruction({
     keys: [
-      { pubkey: world, isSigner: false, isWritable: false },
+      { pubkey: world, isSigner: false, isWritable: true },
       { pubkey: player, isSigner: false, isWritable: true },
       { pubkey: authority, isSigner: true, isWritable: false },
       { pubkey: payer, isSigner: true, isWritable: true },
@@ -64,8 +65,8 @@ export function buildMovePlayerInstruction(
   sprint: boolean = false,
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
-  // Instruction data: [type (1 byte), direction (1 byte), sprint (1 byte)]
-  const data = Buffer.alloc(3);
+  // Instruction data: [discriminant (1 byte), direction (1 byte), sprint (1 byte)]
+  const data = Buffer.alloc(1 + 2);
   data.writeUInt8(WorldInstructionType.MovePlayer, 0);
   data.writeUInt8(direction, 1);
   data.writeUInt8(sprint ? 1 : 0, 2);
@@ -99,8 +100,8 @@ export function buildMovePlayer3DInstruction(
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
   // Instruction data layout (Borsh):
-  // [type (1 byte), move_x (i8), move_z (i8), camera_yaw (i16 LE), sprint (bool), jump (bool)]
-  const data = Buffer.alloc(7);
+  // [discriminant (1 byte), move_x (i8), move_z (i8), camera_yaw (i16 LE), sprint (bool), jump (bool)]
+  const data = Buffer.alloc(1 + 6);
   data.writeUInt8(WorldInstructionType.MovePlayer3D, 0);
   data.writeInt8(input.moveX, 1);
   data.writeInt8(input.moveZ, 2);
@@ -127,9 +128,9 @@ export function buildAttackInstruction(
   authority: PublicKey,
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
-  // Instruction data: [type (1 byte), Option<WeaponStats> as None]
-  // None = 0 byte
-  const data = Buffer.alloc(2);
+  // Instruction data: [discriminant (1 byte), Option<WeaponStats> as None]
+  // Borsh Option::None = single 0 byte
+  const data = Buffer.alloc(1 + 1);
   data.writeUInt8(WorldInstructionType.Attack, 0);
   data.writeUInt8(0, 1); // None
 
@@ -153,8 +154,8 @@ export function buildHealInstruction(
   amount: number = 0, // 0 = use default
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
-  // Instruction data: [type (1 byte), amount (2 bytes)]
-  const data = Buffer.alloc(3);
+  // Instruction data: [discriminant (1 byte), amount (2 bytes)]
+  const data = Buffer.alloc(1 + 2);
   data.writeUInt8(WorldInstructionType.Heal, 0);
   data.writeUInt16LE(amount, 1);
 
@@ -177,6 +178,7 @@ export function buildLeaveWorldInstruction(
   rentDestination: PublicKey,
   programId: PublicKey = WORLD_PROGRAM_ID
 ): TransactionInstruction {
+  // Instruction data: [discriminant (1 byte)] - no payload
   const data = Buffer.alloc(1);
   data.writeUInt8(WorldInstructionType.LeaveWorld, 0);
 

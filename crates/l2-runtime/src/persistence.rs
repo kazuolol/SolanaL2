@@ -230,7 +230,7 @@ impl AccountStorePersistence for crate::AccountStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solana_sdk::account::Account;
+    use solana_sdk::account::{Account, ReadableAccount};
     use tempfile::tempdir;
 
     #[test]

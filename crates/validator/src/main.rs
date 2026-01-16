@@ -22,7 +22,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 mod config;
 
-use solana_sdk::account::{Account, AccountSharedData};
+use solana_sdk::account::{Account, AccountSharedData, ReadableAccount};
 
 /// Create the default world account if it doesn't exist
 fn create_default_world(account_store: &AccountStore, slot: u64) {
@@ -40,8 +40,9 @@ fn create_default_world(account_store: &AccountStore, slot: u64) {
     );
 
     // Check if world already exists
-    if account_store.get_account(&world_pda).is_some() {
-        tracing::info!("Default world already exists: {}", world_pda);
+    if let Some(existing) = account_store.get_account(&world_pda) {
+        tracing::info!("Default world already exists: {} (owner: {}, data_len: {})",
+            world_pda, existing.owner(), existing.data().len());
         return;
     }
 
@@ -220,6 +221,23 @@ async fn run_leader(args: Args) -> Result<()> {
 
     // Create default world account if it doesn't exist
     create_default_world(&account_store, 0);
+
+    // Verify world account was created correctly
+    {
+        let world_program_id = world_program::id();
+        let mut name_bytes = [0u8; 32];
+        name_bytes[..7].copy_from_slice(b"default");
+        let (world_pda, _) = Pubkey::find_program_address(&[b"world", &name_bytes], &world_program_id);
+
+        if let Some(account) = account_store.get_account(&world_pda) {
+            tracing::info!(
+                "World account verified: {} (len={}, owner={})",
+                world_pda, account.data().len(), account.owner()
+            );
+        } else {
+            tracing::error!("CRITICAL: World account NOT FOUND after creation! PDA: {}", world_pda);
+        }
+    }
 
     let rpc_context = Arc::new(RpcContext {
         account_store: account_store.clone(),

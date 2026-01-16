@@ -7,7 +7,7 @@ use crate::{account_store::AccountStore, callback::L2AccountLoader};
 use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_program_runtime::{
     invoke_context::BuiltinFunctionWithContext,
-    loaded_programs::{BlockRelation, ForkGraph, ProgramCacheEntry},
+    loaded_programs::{BlockRelation, ForkGraph, ProgramCacheEntry, ProgramCacheEntryType},
 };
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -55,13 +55,15 @@ impl L2ForkGraph {
 impl ForkGraph for L2ForkGraph {
     fn relationship(&self, a: Slot, b: Slot) -> BlockRelation {
         // In our linear L2 chain, all slots are on the same fork
-        if a == b {
+        let result = if a == b {
             BlockRelation::Equal
         } else if a < b {
             BlockRelation::Ancestor
         } else {
             BlockRelation::Descendant
-        }
+        };
+        tracing::info!("ForkGraph::relationship({}, {}) = {:?}", a, b, result);
+        result
     }
 }
 
@@ -102,6 +104,15 @@ pub struct L2Processor {
 impl L2Processor {
     /// Create a new L2 processor
     pub fn new(account_store: Arc<AccountStore>) -> Self {
+        eprintln!("[L2Processor] Creating new L2Processor...");
+
+        // Pre-initialize the RBPF runtime environment key.
+        // The solana_rbpf library uses a random key for pointer obfuscation in invoke_function.
+        // Initializing it early prevents potential blocking during first transaction execution.
+        eprintln!("[L2Processor] Initializing RBPF runtime environment key...");
+        let key = solana_program_runtime::solana_rbpf::vm::get_runtime_environment_key();
+        eprintln!("[L2Processor] RBPF runtime environment key initialized: {}", key);
+
         let slot = 0;
         let epoch = 0;
 
@@ -132,10 +143,37 @@ impl L2Processor {
         // Create the transaction processor (uninitialized, we'll set up program cache separately)
         let processor = TransactionBatchProcessor::<L2ForkGraph>::new_uninitialized(slot, epoch);
 
-        // Set the fork graph in the program cache (required for program lookups)
+        // Set up the program cache with proper environments and fork graph
         {
             let mut program_cache = processor.program_cache.write().unwrap();
             program_cache.set_fork_graph(Arc::downgrade(&fork_graph));
+
+            // Initialize proper program runtime environments with syscalls
+            // The default ProgramRuntimeEnvironments has empty loaders which can cause
+            // issues during builtin execution. We need properly configured environments.
+            let compute_budget = ComputeBudget::default();
+            match solana_bpf_loader_program::syscalls::create_program_runtime_environment_v1(
+                &feature_set,
+                &compute_budget,
+                false, // reject_deployment_of_broken_elfs
+                false, // debugging_features
+            ) {
+                Ok(runtime_v1) => {
+                    program_cache.environments.program_runtime_v1 = Arc::new(runtime_v1);
+                    tracing::info!("Initialized program_runtime_v1 environment with syscalls");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to create program_runtime_v1: {:?}, using default", e);
+                }
+            }
+
+            // Also initialize v2 (doesn't return Result, always succeeds)
+            let runtime_v2 = solana_bpf_loader_program::syscalls::create_program_runtime_environment_v2(
+                &compute_budget,
+                false, // debugging_features
+            );
+            program_cache.environments.program_runtime_v2 = Arc::new(runtime_v2);
+            tracing::info!("Initialized program_runtime_v2 environment");
         }
 
         let mut this = Self {
@@ -151,6 +189,36 @@ impl L2Processor {
 
         // Register builtin programs
         this.register_builtins();
+
+        // Verify builtins are in cache immediately after registration
+        // NOTE: get_flattened_entries() only returns Loaded entries, NOT Builtin entries!
+        // We must use get_slot_versions_for_tests() to check if builtins are actually in the cache.
+        {
+            let cache = this.processor.program_cache.read().unwrap();
+            let builtin_ids = this.processor.builtin_program_ids.read().unwrap();
+            tracing::info!("After registration: {} builtin IDs registered", builtin_ids.len());
+
+            for id in builtin_ids.iter() {
+                let versions = cache.get_slot_versions_for_tests(id);
+                if versions.is_empty() {
+                    tracing::error!("BUILTIN {} NOT IN CACHE!", id);
+                } else {
+                    tracing::info!("Builtin {} has {} version(s) in cache:", id, versions.len());
+                    for v in versions {
+                        let type_name = match &v.program {
+                            ProgramCacheEntryType::Builtin(_) => "Builtin",
+                            ProgramCacheEntryType::Loaded(_) => "Loaded",
+                            ProgramCacheEntryType::Unloaded(_) => "Unloaded",
+                            ProgramCacheEntryType::FailedVerification(_) => "FailedVerification",
+                            ProgramCacheEntryType::Closed => "Closed",
+                            ProgramCacheEntryType::DelayVisibility => "DelayVisibility",
+                        };
+                        tracing::info!("  - deployment_slot={}, effective_slot={}, type={}",
+                            v.deployment_slot, v.effective_slot, type_name);
+                    }
+                }
+            }
+        }
 
         this
     }
@@ -247,6 +315,8 @@ impl L2Processor {
         program_id: Pubkey,
         entrypoint: BuiltinFunctionWithContext,
     ) {
+        tracing::info!("Registering builtin program: {} ({})", name, program_id);
+
         let builtin = ProgramCacheEntry::new_builtin(
             self.current_slot,
             name.len(),
@@ -261,6 +331,17 @@ impl L2Processor {
             name,
             builtin,
         );
+
+        // Verify the builtin account exists in the store
+        if let Some(account) = self.account_store.get_account(&program_id) {
+            use solana_sdk::account::ReadableAccount;
+            tracing::info!(
+                "  Builtin account verified: owner={}, executable={}, len={}",
+                account.owner(), account.executable(), account.data().len()
+            );
+        } else {
+            tracing::error!("  BUILTIN ACCOUNT NOT FOUND IN STORE!");
+        }
     }
 
     /// Process a batch of transactions
@@ -289,9 +370,12 @@ impl L2Processor {
         };
 
         // Set up processing config
+        // IMPORTANT: limit_to_load_programs = false allows loading programs from accounts
+        // If true, it only uses pre-loaded programs (might cause issues)
         let config = TransactionProcessingConfig {
             compute_budget: Some(ComputeBudget::default()),
             log_messages_bytes_limit: Some(10_000),
+            limit_to_load_programs: false, // Allow loading programs dynamically
             recording_config: ExecutionRecordingConfig {
                 enable_log_recording: true,
                 enable_return_data_recording: true,
@@ -299,6 +383,7 @@ impl L2Processor {
             },
             ..Default::default()
         };
+        tracing::info!("SVM: Config - limit_to_load_programs={}", config.limit_to_load_programs);
 
         // Create check results (all transactions are valid - already sanitized)
         // For gasless L2, we use 0 fees
@@ -311,13 +396,62 @@ impl L2Processor {
             .collect();
 
         // Process the batch
-        let output = self.processor.load_and_execute_sanitized_transactions(
+        tracing::info!("SVM: Starting load_and_execute_sanitized_transactions for {} txs", transactions.len());
+        tracing::info!("SVM: Current slot = {}, epoch = {}", self.current_slot, self.current_epoch);
+
+        // Log program cache state for debugging
+        // NOTE: get_flattened_entries only returns Loaded entries, not Builtin entries!
+        // We verify builtins at startup using get_slot_versions_for_tests instead.
+        {
+            let cache = self.processor.program_cache.read().unwrap();
+            let builtin_ids = self.processor.builtin_program_ids.read().unwrap();
+            tracing::info!("SVM: {} builtins registered, verifying cache state...", builtin_ids.len());
+
+            let mut all_builtins_present = true;
+            for id in builtin_ids.iter() {
+                let versions = cache.get_slot_versions_for_tests(id);
+                if versions.is_empty() {
+                    tracing::error!("SVM: BUILTIN {} MISSING FROM CACHE!", id);
+                    all_builtins_present = false;
+                }
+            }
+            if all_builtins_present {
+                tracing::info!("SVM: All {} builtins present in cache", builtin_ids.len());
+            }
+        }
+
+        // CRITICAL: Fill the sysvar cache from account store before execution
+        // The invoke_context.get_sysvar_cache().get_clock() will fail if this isn't done
+        self.processor.fill_missing_sysvar_cache_entries(&callback);
+        tracing::info!("SVM: Filled sysvar cache entries");
+
+        tracing::info!("SVM: Calling load_and_execute_sanitized_transactions...");
+        eprintln!("[SVM] ABOUT TO CALL load_and_execute_sanitized_transactions");
+        eprintln!("[SVM] slot={}, epoch={}", self.current_slot, self.current_epoch);
+
+        // Use catch_unwind to see if there's a panic
+        let output_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.processor.load_and_execute_sanitized_transactions(
             &callback,
             transactions,
             check_results,
             &environment,
             &config,
-        );
+        )
+        }));
+
+        let output = match output_result {
+            Ok(o) => {
+                eprintln!("[SVM] RETURNED FROM load_and_execute_sanitized_transactions - SUCCESS");
+                o
+            }
+            Err(e) => {
+                eprintln!("[SVM] PANIC in load_and_execute_sanitized_transactions: {:?}", e);
+                panic!("SVM panicked: {:?}", e);
+            }
+        };
+        tracing::info!("SVM: Returned from load_and_execute_sanitized_transactions");
+        tracing::info!("SVM: Completed successfully with {} results", output.processing_results.len());
 
         // Convert results and update account store
         self.process_output(transactions, output)
@@ -376,7 +510,7 @@ impl L2Processor {
                                 modified_accounts.push((*pubkey, account.clone()));
                             }
 
-                            tracing::debug!(
+                            tracing::info!(
                                 "Transaction {} succeeded: {} accounts modified",
                                 signature,
                                 modified_accounts.len()
@@ -394,7 +528,28 @@ impl L2Processor {
                     });
                 }
                 Err(e) => {
-                    tracing::debug!("Transaction {} failed: {:?}", signature, e);
+                    // Log detailed error info including accounts referenced
+                    let account_keys: Vec<_> = tx.message().account_keys().iter().collect();
+                    tracing::error!(
+                        "Transaction {} failed: {:?}",
+                        signature, e
+                    );
+                    tracing::error!("  Accounts referenced ({}):", account_keys.len());
+                    for (i, key) in account_keys.iter().enumerate() {
+                        let exists = self.account_store.account_exists(key);
+                        let account = self.account_store.get_account(key);
+                        let (owner, data_len, executable) = account
+                            .as_ref()
+                            .map(|a| {
+                                use solana_sdk::account::ReadableAccount;
+                                (a.owner().to_string(), a.data().len(), a.executable())
+                            })
+                            .unwrap_or(("N/A".to_string(), 0, false));
+                        tracing::error!(
+                            "    [{}] {} (exists={}, owner={}, len={}, exec={})",
+                            i, key, exists, owner, data_len, executable
+                        );
+                    }
                     results.push(TransactionResult {
                         signature,
                         slot: self.current_slot,
@@ -413,6 +568,26 @@ impl L2Processor {
     /// Advance to the next slot
     pub fn advance_slot(&mut self) {
         self.current_slot += 1;
+
+        // Update fork graph slot FIRST (needed for cache visibility)
+        {
+            let mut fg = self.fork_graph.write().unwrap();
+            fg.set_slot(self.current_slot);
+        }
+
+        // Create new processor at current slot while preserving program cache
+        // This is needed because the processor's internal slot field is used for cache lookups
+        self.processor = self.processor.new_from(self.current_slot, self.current_epoch);
+
+        // Re-attach fork graph to the new program cache
+        {
+            let mut program_cache = self.processor.program_cache.write().unwrap();
+            program_cache.set_fork_graph(Arc::downgrade(&self.fork_graph));
+        }
+
+        // NOTE: We do NOT re-register builtins - they persist in the shared program cache
+        // Builtins registered at slot 0 are visible at all future slots via ForkGraph
+
         self.current_blockhash = Hash::new_unique();
 
         // Update clock sysvar

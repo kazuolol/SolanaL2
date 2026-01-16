@@ -42,3 +42,6 @@ anyhow.workspace = true
 
 # Workspace crates
 world-program.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

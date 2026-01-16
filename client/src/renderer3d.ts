@@ -214,15 +214,20 @@ export class Renderer3D {
     const worldZ = data.positionZ / FIXED_POINT_SCALE;
     const worldY = data.positionY / FIXED_POINT_SCALE;
 
+    console.log(`[Renderer] updatePlayer: key=${playerKey.slice(0, 8)}..., pos=(${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)})`);
+
     // Get or create player mesh
     let playerMesh = this.players.get(playerKey);
     if (!playerMesh) {
+      console.log(`[Renderer] Creating new player mesh for ${playerKey.slice(0, 8)}...`);
       playerMesh = this.createPlayerMesh(playerKey);
       this.players.set(playerKey, playerMesh);
+      console.log(`[Renderer] Player mesh created and added to scene`);
     }
 
     // Update position
     playerMesh.group.position.set(worldX, worldY, worldZ);
+    console.log(`[Renderer] Mesh position set to: (${playerMesh.group.position.x.toFixed(2)}, ${playerMesh.group.position.y.toFixed(2)}, ${playerMesh.group.position.z.toFixed(2)})`);
 
     // Update rotation (yaw: 0-65535 -> 0-2PI)
     const yawRad = (data.yaw / 65536) * Math.PI * 2;
@@ -247,6 +252,7 @@ export class Renderer3D {
 
   private createPlayerMesh(playerKey: string): PlayerMesh {
     const isLocal = playerKey === this.localPlayerKey;
+    console.log(`[Renderer] createPlayerMesh: key=${playerKey.slice(0, 8)}..., isLocal=${isLocal}, localPlayerKey=${this.localPlayerKey?.slice(0, 8) ?? 'null'}`);
 
     // Assign color
     if (!this.playerColorMap.has(playerKey)) {
@@ -254,6 +260,7 @@ export class Renderer3D {
       this.nextColorIndex++;
     }
     const color = this.playerColorMap.get(playerKey)!;
+    console.log(`[Renderer] Player color: 0x${color.toString(16)} (${isLocal ? 'green/local' : 'other'})`);
 
     // Create group
     const group = new THREE.Group();

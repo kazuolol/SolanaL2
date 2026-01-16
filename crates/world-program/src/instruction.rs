@@ -27,7 +27,7 @@ pub enum WorldInstruction {
     /// Join the world (create player account)
     ///
     /// Accounts:
-    /// 0. `[]` World config account
+    /// 0. `[writable]` World config account (player_count is incremented)
     /// 1. `[writable]` World player account (PDA)
     /// 2. `[signer]` Player authority (wallet)
     /// 3. `[signer, writable]` Payer

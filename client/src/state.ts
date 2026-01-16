@@ -93,8 +93,15 @@ export function directionToVector(direction: Direction): [number, number] {
   }
 }
 
+/** Expected size of WorldPlayer account data */
+export const WORLD_PLAYER_SIZE = 123;
+
 /** Decode WorldPlayer from account data (3D layout) */
 export function decodeWorldPlayer(data: Buffer): WorldPlayer {
+  if (data.length < WORLD_PLAYER_SIZE) {
+    throw new Error(`WorldPlayer data too short: ${data.length} bytes, expected at least ${WORLD_PLAYER_SIZE}`);
+  }
+
   let offset = 0;
 
   // authority: Pubkey (32 bytes)

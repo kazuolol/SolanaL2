@@ -110,6 +110,7 @@ async fn handle_rpc(
 
 /// Dispatch to appropriate method handler
 fn dispatch_method(ctx: &RpcContext, method: &str, params: Value) -> Result<Value, RpcError> {
+    tracing::info!("RPC method called: {}", method);
     match method {
         "sendTransaction" => {
             let params: Vec<Value> = serde_json::from_value(params).unwrap_or_default();

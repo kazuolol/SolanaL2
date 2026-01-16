@@ -22,12 +22,20 @@ use crate::{
 };
 
 // Use the declare_process_instruction! macro to create a properly typed builtin entrypoint
+// IMPORTANT: The macro creates a nested function called process_instruction_inner,
+// so we must not call any function with that name from inside the macro body.
+// Instead, we inline the processing code directly in the macro.
 solana_program_runtime::declare_process_instruction!(Entrypoint, 200, |invoke_context| {
-    process_instruction_inner(invoke_context)
+    eprintln!("[BUILTIN] Entry point called!");
+    world_instruction_dispatch(invoke_context)
 });
 
-/// Process a world program instruction
-fn process_instruction_inner(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+/// Dispatch world program instructions
+/// NOTE: This function MUST have a different name than process_instruction_inner
+/// because the declare_process_instruction! macro creates a nested function with that name.
+fn world_instruction_dispatch(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+    eprintln!("[BUILTIN] world_instruction_dispatch ENTRY");
+    solana_program::msg!("World program: process_instruction_inner called");
     let transaction_context = &*invoke_context.transaction_context;
     let instruction_context = transaction_context
         .get_current_instruction_context()
@@ -37,15 +45,19 @@ fn process_instruction_inner(invoke_context: &mut InvokeContext) -> Result<(), I
     let instruction_data = instruction_context.get_instruction_data();
 
     // Deserialize instruction
+    eprintln!("[BUILTIN] deserializing instruction, data_len={}", instruction_data.len());
     let instruction = WorldInstruction::try_from_slice(instruction_data)
         .map_err(|_| InstructionError::InvalidInstructionData)?;
+    eprintln!("[BUILTIN] instruction deserialized successfully");
 
     // Get program ID
     let program_id = instruction_context
         .get_last_program_key(transaction_context)
         .map_err(|_| InstructionError::UnsupportedProgramId)?;
+    eprintln!("[BUILTIN] program_id for dispatch: {}", program_id);
 
     // Dispatch to instruction handler
+    eprintln!("[BUILTIN] dispatching instruction...");
     match instruction {
         WorldInstruction::InitializeWorld {
             name,
@@ -153,57 +165,80 @@ fn process_join_world(
     invoke_context: &mut InvokeContext,
     name: [u8; 16],
 ) -> Result<(), InstructionError> {
+    eprintln!("[BUILTIN] process_join_world ENTRY");
+    solana_program::msg!("World program: process_join_world called");
     let transaction_context = &*invoke_context.transaction_context;
+    eprintln!("[BUILTIN] got transaction_context");
     let instruction_context = transaction_context
         .get_current_instruction_context()
         .map_err(|_| InstructionError::InvalidInstructionData)?;
+    eprintln!("[BUILTIN] got instruction_context");
 
     // Account indices: 0=world, 1=player, 2=authority, 3=payer, 4=system_program
+    eprintln!("[BUILTIN] about to borrow world_account (index 0)");
     let mut world_account = instruction_context
         .try_borrow_instruction_account(transaction_context, 0)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] borrowed world_account successfully");
 
+    eprintln!("[BUILTIN] about to borrow player_account (index 1)");
     let mut player_account = instruction_context
         .try_borrow_instruction_account(transaction_context, 1)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] borrowed player_account successfully");
 
+    eprintln!("[BUILTIN] about to borrow authority_account (index 2)");
     let authority_account = instruction_context
         .try_borrow_instruction_account(transaction_context, 2)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] borrowed authority_account successfully");
 
     // Verify authority is signer
+    eprintln!("[BUILTIN] checking authority is_signer");
     if !authority_account.is_signer() {
         return Err(InstructionError::MissingRequiredSignature);
     }
+    eprintln!("[BUILTIN] authority is signer: OK");
 
     // Load world config
+    eprintln!("[BUILTIN] about to get world_account.get_data()");
     let world_data = world_account.get_data();
+    eprintln!("[BUILTIN] got world_data, len={}", world_data.len());
     let mut world = WorldConfig::try_from_slice(world_data)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] deserialized WorldConfig, player_count={}", world.player_count);
 
     // Check if world is full
     if world.is_full() {
         return Err(InstructionError::Custom(1)); // WorldFull
     }
+    eprintln!("[BUILTIN] world not full: OK");
 
     // Get program ID for PDA derivation
+    eprintln!("[BUILTIN] getting program_id");
     let program_id = instruction_context
         .get_last_program_key(transaction_context)
         .map_err(|_| InstructionError::UnsupportedProgramId)?;
+    eprintln!("[BUILTIN] program_id = {}", program_id);
 
     // Verify player PDA
+    eprintln!("[BUILTIN] deriving player PDA");
     let (expected_pda, bump) = WorldPlayer::derive_pda(
         world_account.get_key(),
         authority_account.get_key(),
         program_id,
     );
+    eprintln!("[BUILTIN] expected_pda = {}, actual = {}", expected_pda, player_account.get_key());
     if expected_pda != *player_account.get_key() {
         return Err(InstructionError::InvalidSeeds);
     }
+    eprintln!("[BUILTIN] PDA verified: OK");
 
     // Get clock for timestamp
+    eprintln!("[BUILTIN] about to get clock from sysvar_cache");
     let clock = invoke_context.get_sysvar_cache().get_clock()
         .map_err(|_| InstructionError::UnsupportedSysvar)?;
+    eprintln!("[BUILTIN] got clock, slot={}", clock.slot);
 
     // Initialize player at world center
     let player = WorldPlayer {
@@ -227,27 +262,38 @@ fn process_join_world(
     };
 
     // Serialize player to account data
+    eprintln!("[BUILTIN] about to call player_account.get_data_mut() - THIS IS THE CRITICAL POINT");
     let player_data = player_account.get_data_mut()
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] got player_data_mut, len={}", player_data.len());
 
     if player_data.len() < WorldPlayer::LEN {
+        eprintln!("[BUILTIN] ERROR: player_data.len()={} < WorldPlayer::LEN={}", player_data.len(), WorldPlayer::LEN);
         return Err(InstructionError::AccountDataTooSmall);
     }
+    eprintln!("[BUILTIN] player data size OK, serializing player");
 
     borsh::to_writer(&mut player_data[..], &player)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] serialized player to account");
 
     // Update world player count
     world.player_count += 1;
+    eprintln!("[BUILTIN] incremented player_count to {}", world.player_count);
 
     // Drop player_account borrow before mutating world_account again
     drop(player_account);
+    eprintln!("[BUILTIN] dropped player_account borrow");
 
+    eprintln!("[BUILTIN] about to call world_account.get_data_mut()");
     let world_data_mut = world_account.get_data_mut()
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] got world_data_mut, serializing world");
     borsh::to_writer(&mut world_data_mut[..], &world)
         .map_err(|_| InstructionError::InvalidAccountData)?;
+    eprintln!("[BUILTIN] serialized world to account");
 
+    eprintln!("[BUILTIN] process_join_world SUCCESS");
     Ok(())
 }
 
